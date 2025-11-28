@@ -1,0 +1,777 @@
+"use client"
+
+import { useState, useEffect } from "react"
+import {
+    Table,
+    TableBody,
+    TableCell,
+    TableHead,
+    TableHeader,
+    TableRow,
+} from "@/components/ui/table"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { Textarea } from "@/components/ui/textarea"
+import {
+    Dialog,
+    DialogContent,
+    DialogHeader,
+    DialogTitle,
+    DialogTrigger,
+    DialogFooter,
+    DialogDescription
+} from "@/components/ui/dialog"
+import {
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+} from "@/components/ui/select"
+import { Label } from "@/components/ui/label"
+import { Trash2, Plus, Loader2, Pencil, Eye, History, FileText, AlertTriangle, Upload } from "lucide-react"
+import { toast } from "sonner"
+import { format } from "date-fns"
+import { es } from "date-fns/locale"
+import { createClient } from "@/lib/supabase/client"
+
+interface Student {
+    id_alumno: number
+    nombre: string
+    email: string
+    genero: string
+    direccion: string
+    telefono: number
+    curso?: Course | null
+}
+
+interface Course {
+    id_curso: number
+    nombre: string
+    nivel: string
+    año: number
+}
+
+interface StudentWithCourse extends Student {
+    curso?: Course | null
+}
+
+interface HistoryRecord {
+    id_historial: number
+    tipo_cambio: string
+    datos_anteriores: any
+    datos_nuevos: any
+    motivo: string
+    documento_url: string
+    created_at: string
+    usuario_email: string
+    usuario_nombre: string
+}
+
+export function StudentsManager() {
+    const [students, setStudents] = useState<Student[]>([])
+    const [courses, setCourses] = useState<Course[]>([])
+    const [loading, setLoading] = useState(true)
+
+    // Create/Edit Modal State
+    const [isOpen, setIsOpen] = useState(false)
+    const [submitting, setSubmitting] = useState(false)
+    const [editingId, setEditingId] = useState<number | null>(null)
+
+    // View Details Modal State
+    const [viewModalOpen, setViewModalOpen] = useState(false)
+    const [selectedStudent, setSelectedStudent] = useState<StudentWithCourse | null>(null)
+    const [loadingDetails, setLoadingDetails] = useState(false)
+
+    // History Modal State
+    const [historyModalOpen, setHistoryModalOpen] = useState(false)
+    const [studentHistory, setStudentHistory] = useState<HistoryRecord[]>([])
+    const [loadingHistory, setLoadingHistory] = useState(false)
+
+    // Delete Modal State
+    const [deleteModalOpen, setDeleteModalOpen] = useState(false)
+    const [studentToDelete, setStudentToDelete] = useState<number | null>(null)
+    const [deleteReason, setDeleteReason] = useState("")
+    const [deleting, setDeleting] = useState(false)
+    const [selectedFile, setSelectedFile] = useState<File | null>(null)
+    const [uploading, setUploading] = useState(false)
+
+    const [formData, setFormData] = useState({
+        nombre: "",
+        email: "",
+        genero: "",
+        direccion: "",
+        telefono: "",
+        id_curso: "null"
+    })
+
+    // Filters
+    const [searchTerm, setSearchTerm] = useState("")
+    const [courseFilter, setCourseFilter] = useState("all")
+    const [enrollmentFilter, setEnrollmentFilter] = useState("all")
+    const [genderFilter, setGenderFilter] = useState("all")
+
+    const filteredStudents = students.filter(student => {
+        const matchesSearch = student.nombre.toLowerCase().includes(searchTerm.toLowerCase())
+        const matchesCourse = courseFilter === "all" || student.curso?.id_curso.toString() === courseFilter
+        const matchesEnrollment = enrollmentFilter === "all" ||
+            (enrollmentFilter === "enrolled" && student.curso) ||
+            (enrollmentFilter === "not_enrolled" && !student.curso)
+        const matchesGender = genderFilter === "all" || student.genero === genderFilter
+
+        return matchesSearch && matchesCourse && matchesEnrollment && matchesGender
+    })
+
+    const fetchData = async () => {
+        setLoading(true)
+        try {
+            const [studentsRes, coursesRes] = await Promise.all([
+                fetch("/api/admin/students"),
+                fetch("/api/admin/courses")
+            ])
+
+            if (!studentsRes.ok || !coursesRes.ok) throw new Error("Failed to fetch data")
+
+            const studentsData = await studentsRes.json()
+            const coursesData = await coursesRes.json()
+
+            setStudents(studentsData || [])
+            setCourses(coursesData || [])
+        } catch (error) {
+            console.error("Error fetching data:", error)
+            toast.error("Error al cargar datos")
+        } finally {
+            setLoading(false)
+        }
+    }
+
+    useEffect(() => {
+        fetchData()
+    }, [])
+
+    const handleSubmit = async (e: React.FormEvent) => {
+        e.preventDefault()
+        setSubmitting(true)
+
+        try {
+            const payload = {
+                nombre: formData.nombre,
+                email: formData.email,
+                genero: formData.genero,
+                direccion: formData.direccion,
+                telefono: formData.telefono ? parseInt(formData.telefono) : null,
+                id_curso: formData.id_curso === "null" ? null : parseInt(formData.id_curso)
+            }
+
+            if (editingId) {
+                const response = await fetch("/api/admin/students", {
+                    method: "PUT",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ ...payload, id_alumno: editingId }),
+                })
+                if (!response.ok) {
+                    const errorData = await response.json()
+                    throw new Error(errorData.error || "Failed to update")
+                }
+                toast.success("Alumno actualizado correctamente")
+            } else {
+                const response = await fetch("/api/admin/students", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(payload),
+                })
+                if (!response.ok) {
+                    const errorData = await response.json()
+                    throw new Error(errorData.error || "Failed to create")
+                }
+                toast.success("Alumno agregado correctamente")
+            }
+
+            setIsOpen(false)
+            setEditingId(null)
+            setFormData({
+                nombre: "",
+                email: "",
+                genero: "",
+                direccion: "",
+                telefono: "",
+                id_curso: "null"
+            })
+            fetchData()
+        } catch (error: any) {
+            console.error("Error saving student:", error)
+            toast.error(error.message || "Error al guardar alumno")
+        } finally {
+            setSubmitting(false)
+        }
+    }
+
+    const handleEdit = async (student: Student) => {
+        setEditingId(student.id_alumno)
+
+        // Fetch current enrollment to populate form
+        try {
+            const response = await fetch(`/api/admin/students?id=${student.id_alumno}`)
+            const data = await response.json()
+
+            setFormData({
+                nombre: student.nombre,
+                email: student.email,
+                genero: student.genero || "",
+                direccion: student.direccion || "",
+                telefono: student.telefono?.toString() || "",
+                id_curso: data.curso ? data.curso.id_curso.toString() : "null"
+            })
+            setIsOpen(true)
+        } catch (error) {
+            console.error("Error fetching student details for edit:", error)
+            toast.error("Error al cargar datos del alumno")
+        }
+    }
+
+    const handleDeleteClick = (id: number) => {
+        setStudentToDelete(id)
+        setDeleteReason("")
+        setSelectedFile(null)
+        setDeleteModalOpen(true)
+    }
+
+    const confirmDelete = async () => {
+        if (!studentToDelete || !deleteReason.trim()) {
+            toast.error("Debes ingresar un motivo para la baja")
+            return
+        }
+
+        setDeleting(true)
+        try {
+            let documentoUrl = null
+
+            if (selectedFile) {
+                setUploading(true)
+                try {
+                    const supabase = createClient()
+                    const fileExt = selectedFile.name.split('.').pop()
+                    const fileName = `bajas/${studentToDelete}_${Date.now()}.${fileExt}`
+
+                    const { error: uploadError } = await supabase.storage
+                        .from('student-documents')
+                        .upload(fileName, selectedFile)
+
+                    if (uploadError) throw uploadError
+
+                    const { data: { publicUrl } } = supabase.storage
+                        .from('student-documents')
+                        .getPublicUrl(fileName)
+
+                    documentoUrl = publicUrl
+                } catch (error) {
+                    console.error("Error uploading file:", error)
+                    toast.error("Error al subir el documento, pero se procederá con la baja")
+                } finally {
+                    setUploading(false)
+                }
+            }
+
+            const response = await fetch("/api/admin/students", {
+                method: "DELETE",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    id_alumno: studentToDelete,
+                    motivo: deleteReason,
+                    documento_url: documentoUrl
+                })
+            })
+
+            if (!response.ok) throw new Error("Failed to delete")
+
+            toast.success("Alumno dado de baja correctamente")
+            setStudents(students.filter((s) => s.id_alumno !== studentToDelete))
+            setDeleteModalOpen(false)
+            setStudentToDelete(null)
+            setSelectedFile(null)
+        } catch (error) {
+            console.error("Error deleting student:", error)
+            toast.error("Error al dar de baja al alumno")
+        } finally {
+            setDeleting(false)
+        }
+    }
+
+    const handleViewDetails = async (studentId: number) => {
+        setLoadingDetails(true)
+        setViewModalOpen(true)
+        try {
+            const response = await fetch(`/api/admin/students?id=${studentId}`)
+            if (!response.ok) throw new Error("Failed to fetch student details")
+            const data = await response.json()
+            setSelectedStudent(data)
+        } catch (error) {
+            console.error("Error fetching student details:", error)
+            toast.error("Error al cargar detalles del alumno")
+            setViewModalOpen(false)
+        } finally {
+            setLoadingDetails(false)
+        }
+    }
+
+    const handleViewHistory = async (studentId: number) => {
+        setLoadingHistory(true)
+        setHistoryModalOpen(true)
+        try {
+            const response = await fetch(`/api/admin/students/history?id_alumno=${studentId}`)
+            if (!response.ok) throw new Error("Failed to fetch history")
+            const data = await response.json()
+            setStudentHistory(data)
+        } catch (error) {
+            console.error("Error fetching history:", error)
+            toast.error("Error al cargar historial")
+        } finally {
+            setLoadingHistory(false)
+        }
+    }
+
+    if (loading) {
+        return (
+            <div className="flex justify-center p-8">
+                <Loader2 className="h-8 w-8 animate-spin text-blue-500" />
+            </div>
+        )
+    }
+
+    return (
+        <div className="space-y-4">
+            <div className="flex flex-col gap-4">
+                <div className="flex justify-between items-center">
+                    <h3 className="text-lg font-medium">Gestión de Alumnos</h3>
+                    <Dialog open={isOpen} onOpenChange={(open) => {
+                        setIsOpen(open)
+                        if (!open) {
+                            setEditingId(null)
+                            setFormData({
+                                nombre: "",
+                                email: "",
+                                genero: "",
+                                direccion: "",
+                                telefono: "",
+                                id_curso: "null"
+                            })
+                        }
+                    }}>
+                        <DialogTrigger asChild>
+                            <Button>
+                                <Plus className="mr-2 h-4 w-4" />
+                                Nuevo Alumno
+                            </Button>
+                        </DialogTrigger>
+                        <DialogContent>
+                            <DialogHeader>
+                                <DialogTitle>{editingId ? "Editar Alumno" : "Alta de Alumno"}</DialogTitle>
+                            </DialogHeader>
+                            <form onSubmit={handleSubmit} className="space-y-4">
+                                <div className="space-y-2">
+                                    <Label htmlFor="nombre">Nombre Completo</Label>
+                                    <Input
+                                        id="nombre"
+                                        value={formData.nombre}
+                                        onChange={(e) => setFormData({ ...formData, nombre: e.target.value })}
+                                        required
+                                    />
+                                </div>
+
+                                <div className="space-y-2">
+                                    <Label htmlFor="email">Email</Label>
+                                    <Input
+                                        id="email"
+                                        type="email"
+                                        value={formData.email}
+                                        onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                                        required
+                                    />
+                                </div>
+
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div className="space-y-2">
+                                        <Label htmlFor="genero">Género</Label>
+                                        <Select
+                                            value={formData.genero}
+                                            onValueChange={(value) => setFormData({ ...formData, genero: value })}
+                                        >
+                                            <SelectTrigger>
+                                                <SelectValue placeholder="Seleccionar" />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                <SelectItem value="Masculino">Masculino</SelectItem>
+                                                <SelectItem value="Femenino">Femenino</SelectItem>
+                                                <SelectItem value="Otro">Otro</SelectItem>
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
+                                    <div className="space-y-2">
+                                        <Label htmlFor="telefono">Teléfono</Label>
+                                        <Input
+                                            id="telefono"
+                                            type="number"
+                                            value={formData.telefono}
+                                            onChange={(e) => setFormData({ ...formData, telefono: e.target.value })}
+                                        />
+                                    </div>
+                                </div>
+
+                                <div className="space-y-2">
+                                    <Label htmlFor="direccion">Dirección</Label>
+                                    <Input
+                                        id="direccion"
+                                        value={formData.direccion}
+                                        onChange={(e) => setFormData({ ...formData, direccion: e.target.value })}
+                                    />
+                                </div>
+
+                                <div className="space-y-2">
+                                    <Label htmlFor="curso">Asignar Curso (Opcional)</Label>
+                                    <Select
+                                        value={formData.id_curso}
+                                        onValueChange={(value) => setFormData({ ...formData, id_curso: value })}
+                                    >
+                                        <SelectTrigger>
+                                            <SelectValue placeholder="Seleccionar curso" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="null">Sin asignar</SelectItem>
+                                            {courses.map((course) => (
+                                                <SelectItem key={course.id_curso} value={course.id_curso.toString()}>
+                                                    {course.año}º {course.nivel} - {course.nombre}
+                                                </SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+
+                                <Button type="submit" className="w-full" disabled={submitting}>
+                                    {submitting ? "Guardando..." : "Guardar"}
+                                </Button>
+                            </form>
+                        </DialogContent>
+                    </Dialog>
+                </div>
+
+                {/* Filters */}
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-4 bg-white p-4 rounded-lg border shadow-sm">
+                    <div className="space-y-2">
+                        <Label>Buscar por nombre</Label>
+                        <Input
+                            placeholder="Nombre del alumno..."
+                            value={searchTerm}
+                            onChange={(e) => setSearchTerm(e.target.value)}
+                        />
+                    </div>
+
+                    <div className="space-y-2">
+                        <Label>Filtrar por Curso</Label>
+                        <Select value={courseFilter} onValueChange={setCourseFilter}>
+                            <SelectTrigger>
+                                <SelectValue placeholder="Todos los cursos" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="all">Todos los cursos</SelectItem>
+                                {courses.map((course) => (
+                                    <SelectItem key={course.id_curso} value={course.id_curso.toString()}>
+                                        {course.año}º {course.nivel} - {course.nombre}
+                                    </SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+                    </div>
+
+                    <div className="space-y-2">
+                        <Label>Estado de Inscripción</Label>
+                        <Select value={enrollmentFilter} onValueChange={setEnrollmentFilter}>
+                            <SelectTrigger>
+                                <SelectValue placeholder="Todos" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="all">Todos</SelectItem>
+                                <SelectItem value="enrolled">Inscritos en curso</SelectItem>
+                                <SelectItem value="not_enrolled">Sin curso asignado</SelectItem>
+                            </SelectContent>
+                        </Select>
+                    </div>
+
+                    <div className="space-y-2">
+                        <Label>Género</Label>
+                        <Select value={genderFilter} onValueChange={setGenderFilter}>
+                            <SelectTrigger>
+                                <SelectValue placeholder="Todos" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="all">Todos</SelectItem>
+                                <SelectItem value="Masculino">Masculino</SelectItem>
+                                <SelectItem value="Femenino">Femenino</SelectItem>
+                                <SelectItem value="Otro">Otro</SelectItem>
+                            </SelectContent>
+                        </Select>
+                    </div>
+                </div>
+            </div>
+
+            <div className="border rounded-md">
+                <Table>
+                    <TableHeader>
+                        <TableRow>
+                            <TableHead>Nombre</TableHead>
+                            <TableHead>Email</TableHead>
+                            <TableHead>Teléfono</TableHead>
+                            <TableHead className="text-right">Acciones</TableHead>
+                        </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                        {filteredStudents.length === 0 ? (
+                            <TableRow>
+                                <TableCell colSpan={4} className="text-center py-8 text-gray-500">
+                                    No se encontraron alumnos
+                                </TableCell>
+                            </TableRow>
+                        ) : (
+                            filteredStudents.map((student) => (
+                                <TableRow
+                                    key={student.id_alumno}
+                                    className="cursor-pointer hover:bg-gray-50"
+                                    onClick={() => handleViewDetails(student.id_alumno)}
+                                >
+                                    <TableCell className="font-medium">{student.nombre}</TableCell>
+                                    <TableCell>{student.email}</TableCell>
+                                    <TableCell>{student.telefono || "-"}</TableCell>
+                                    <TableCell className="text-right">
+                                        <div className="flex justify-end gap-2" onClick={(e) => e.stopPropagation()}>
+                                            <Button
+                                                variant="ghost"
+                                                size="icon"
+                                                onClick={() => handleViewHistory(student.id_alumno)}
+                                                className="text-gray-500 hover:text-gray-700 hover:bg-gray-50"
+                                                title="Ver Historial"
+                                            >
+                                                <History className="h-4 w-4" />
+                                            </Button>
+                                            <Button
+                                                variant="ghost"
+                                                size="icon"
+                                                onClick={() => handleViewDetails(student.id_alumno)}
+                                                className="text-green-500 hover:text-green-700 hover:bg-green-50"
+                                                title="Ver detalles"
+                                            >
+                                                <Eye className="h-4 w-4" />
+                                            </Button>
+                                            <Button
+                                                variant="ghost"
+                                                size="icon"
+                                                onClick={() => handleEdit(student)}
+                                                className="text-blue-500 hover:text-blue-700 hover:bg-blue-50"
+                                                title="Editar"
+                                            >
+                                                <Pencil className="h-4 w-4" />
+                                            </Button>
+                                            <Button
+                                                variant="ghost"
+                                                size="icon"
+                                                onClick={() => handleDeleteClick(student.id_alumno)}
+                                                className="text-red-500 hover:text-red-700 hover:bg-red-50"
+                                                title="Dar de Baja"
+                                            >
+                                                <Trash2 className="h-4 w-4" />
+                                            </Button>
+                                        </div>
+                                    </TableCell>
+                                </TableRow>
+                            ))
+                        )}
+                    </TableBody>
+                </Table>
+            </div>
+
+            {/* View Student Details Modal */}
+            <Dialog open={viewModalOpen} onOpenChange={setViewModalOpen}>
+                <DialogContent className="max-w-2xl">
+                    <DialogHeader>
+                        <DialogTitle>Detalles del Alumno</DialogTitle>
+                    </DialogHeader>
+                    {loadingDetails ? (
+                        <div className="flex justify-center p-8">
+                            <Loader2 className="h-8 w-8 animate-spin text-blue-500" />
+                        </div>
+                    ) : selectedStudent ? (
+                        <div className="space-y-6">
+                            <div className="grid grid-cols-2 gap-4">
+                                <div className="space-y-2">
+                                    <Label className="text-sm font-medium text-gray-500">Nombre Completo</Label>
+                                    <p className="text-base font-medium">{selectedStudent.nombre}</p>
+                                </div>
+                                <div className="space-y-2">
+                                    <Label className="text-sm font-medium text-gray-500">Email</Label>
+                                    <p className="text-base">{selectedStudent.email}</p>
+                                </div>
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-4">
+                                <div className="space-y-2">
+                                    <Label className="text-sm font-medium text-gray-500">Género</Label>
+                                    <p className="text-base">{selectedStudent.genero || "-"}</p>
+                                </div>
+                                <div className="space-y-2">
+                                    <Label className="text-sm font-medium text-gray-500">Teléfono</Label>
+                                    <p className="text-base">{selectedStudent.telefono || "-"}</p>
+                                </div>
+                            </div>
+
+                            <div className="space-y-2">
+                                <Label className="text-sm font-medium text-gray-500">Dirección</Label>
+                                <p className="text-base">{selectedStudent.direccion || "-"}</p>
+                            </div>
+
+                            <div className="border-t pt-4">
+                                <Label className="text-sm font-medium text-gray-500 mb-3 block">Curso Inscrito</Label>
+                                {selectedStudent.curso ? (
+                                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                                        <p className="text-lg font-semibold text-blue-900">{selectedStudent.curso.nombre}</p>
+                                        <div className="flex gap-4 mt-2 text-sm text-blue-700">
+                                            <span>Nivel: {selectedStudent.curso.nivel}</span>
+                                            <span>•</span>
+                                            <span>Año: {selectedStudent.curso.año}</span>
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
+                                        <p className="text-gray-500 italic">No está inscrito en ningún curso</p>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    ) : null}
+                </DialogContent>
+            </Dialog>
+
+            {/* History Modal */}
+            <Dialog open={historyModalOpen} onOpenChange={setHistoryModalOpen}>
+                <DialogContent className="max-w-3xl max-h-[80vh] overflow-y-auto">
+                    <DialogHeader>
+                        <DialogTitle>Historial de Cambios</DialogTitle>
+                    </DialogHeader>
+                    {loadingHistory ? (
+                        <div className="flex justify-center p-8">
+                            <Loader2 className="h-8 w-8 animate-spin text-blue-500" />
+                        </div>
+                    ) : (
+                        <div className="space-y-4">
+                            {studentHistory.length === 0 ? (
+                                <p className="text-center text-gray-500 py-8">No hay historial registrado</p>
+                            ) : (
+                                studentHistory.map((record) => (
+                                    <div key={record.id_historial} className="border rounded-lg p-4 space-y-2 bg-gray-50">
+                                        <div className="flex justify-between items-start">
+                                            <div>
+                                                <span className={`inline-block px-2 py-1 rounded text-xs font-medium mb-2 ${record.tipo_cambio === 'alta' ? 'bg-green-100 text-green-800' :
+                                                    record.tipo_cambio === 'baja' ? 'bg-red-100 text-red-800' :
+                                                        'bg-blue-100 text-blue-800'
+                                                    }`}>
+                                                    {record.tipo_cambio.toUpperCase()}
+                                                </span>
+                                                <p className="text-sm text-gray-500">
+                                                    Por: {record.usuario_nombre || record.usuario_email || 'Sistema'}
+                                                </p>
+                                            </div>
+                                            <span className="text-sm text-gray-500">
+                                                {format(new Date(record.created_at), "dd/MM/yyyy HH:mm", { locale: es })}
+                                            </span>
+                                        </div>
+
+                                        {record.motivo && (
+                                            <div className="bg-white p-2 rounded border">
+                                                <p className="text-sm font-medium text-gray-700">Motivo:</p>
+                                                <p className="text-sm text-gray-600">{record.motivo}</p>
+                                            </div>
+                                        )}
+
+                                        {record.documento_url && (
+                                            <div className="flex items-center gap-2 text-sm text-blue-600">
+                                                <FileText className="h-4 w-4" />
+                                                <a href={record.documento_url} target="_blank" rel="noopener noreferrer" className="hover:underline">
+                                                    Ver documento de respaldo
+                                                </a>
+                                            </div>
+                                        )}
+                                    </div>
+                                ))
+                            )}
+                        </div>
+                    )}
+                </DialogContent>
+            </Dialog>
+
+            {/* Delete Confirmation Modal */}
+            <Dialog open={deleteModalOpen} onOpenChange={setDeleteModalOpen}>
+                <DialogContent>
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2 text-red-600">
+                            <AlertTriangle className="h-5 w-5" />
+                            Confirmar Baja de Alumno
+                        </DialogTitle>
+                        <DialogDescription>
+                            Esta acción registrará la baja en el historial y eliminará al alumno del sistema.
+                        </DialogDescription>
+                    </DialogHeader>
+
+                    <div className="space-y-4 py-4">
+                        <div className="space-y-2">
+                            <Label htmlFor="motivo">Motivo de la baja (Requerido)</Label>
+                            <Textarea
+                                id="motivo"
+                                placeholder="Explique el motivo de la baja..."
+                                value={deleteReason}
+                                onChange={(e) => setDeleteReason(e.target.value)}
+                                className="min-h-[100px]"
+                            />
+                        </div>
+
+                        <div className="space-y-2">
+                            <Label>Documentación de respaldo (Opcional)</Label>
+                            <div className="relative border-2 border-dashed rounded-lg p-6 text-center hover:bg-gray-50 cursor-pointer transition-colors">
+                                <div className="flex flex-col items-center gap-2">
+                                    <Upload className="h-8 w-8 text-gray-400" />
+                                    <span className="text-sm text-gray-500">
+                                        {selectedFile ? selectedFile.name : "Haga clic para subir archivo (PDF, IMG)"}
+                                    </span>
+                                    <Input
+                                        type="file"
+                                        className="hidden"
+                                        id="file-upload"
+                                        accept=".pdf,.jpg,.jpeg,.png"
+                                        onChange={(e) => {
+                                            if (e.target.files && e.target.files[0]) {
+                                                setSelectedFile(e.target.files[0])
+                                            }
+                                        }}
+                                    />
+                                    <Label htmlFor="file-upload" className="cursor-pointer absolute inset-0" />
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setDeleteModalOpen(false)} disabled={deleting}>
+                            Cancelar
+                        </Button>
+                        <Button variant="destructive" onClick={confirmDelete} disabled={deleting || uploading || !deleteReason.trim()}>
+                            {deleting || uploading ? (
+                                <>
+                                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                    Procesando...
+                                </>
+                            ) : (
+                                "Confirmar Baja"
+                            )}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+        </div >
+    )
+}
