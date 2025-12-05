@@ -1,14 +1,18 @@
 "use client"
 
 import { useEffect, useState } from "react"
+import { usePathname } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { createClient } from "@/lib/supabase/client"
 import Link from "next/link"
 
 export function HeaderUser() {
+  const pathname = usePathname()
   const [user, setUser] = useState<{ email?: string; user_metadata?: { nombre?: string } } | null>(null)
   const [role, setRole] = useState<string>("usuario")
   const [loading, setLoading] = useState(true)
+
+  const isOnAdminPage = pathname?.startsWith("/admin")
 
   useEffect(() => {
     const getUser = async () => {
@@ -57,7 +61,7 @@ export function HeaderUser() {
   const nombre = user?.user_metadata?.nombre || user?.email?.split("@")[0] || "Usuario"
 
   return (
-    <nav className="bg-white shadow-md">
+    <nav className="bg-white shadow-md sticky top-0 z-50">
       <div className="max-w-7xl mx-auto px-4 py-4 flex justify-between items-center">
         <div className="flex items-center gap-2">
           <h1 className="text-2xl font-bold text-blue-600">EEST1VL</h1>
@@ -67,7 +71,7 @@ export function HeaderUser() {
             <span className="font-semibold text-gray-800">{nombre}</span>
             <span className="text-sm text-gray-600 capitalize">{role}</span>
           </div>
-          {role === "admin" && (
+          {role === "admin" && !isOnAdminPage && (
             <Link href="/admin">
               <Button variant="ghost">Panel Admin</Button>
             </Link>

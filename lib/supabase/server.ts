@@ -28,7 +28,6 @@ export async function createAdminClient() {
   return createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL || "https://yzdksqysuglvbgtlivuz.supabase.co",
     process.env.SUPABASE_SERVICE_ROLE_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inl6ZGtzcXlzdWdsdmJndGxpdnV6Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2MjUyNTI4OCwiZXhwIjoyMDc4MTAxMjg4fQ.GXC5-mczLOtKrQSMe0Fr6AAzCwDl6lw2buGMwRm0fUk",
-    process.env.SUPABASE_ANON_KEY || "",
     {
       auth: {
         autoRefreshToken: false,
